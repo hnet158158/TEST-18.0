@@ -1,1 +1,1 @@
-{"mcpServers":{"tavily":{"command":"npx","args":["-y","tavily-mcp@0.2.3"],"env":{"TAVILY_API_KEY":"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"},"alwaysAllow":["tavily-search","tavily-extract","tavily-crawl","tavily-map"]}}} 
+{"mcpServers":{"tavily":{"command":"npx","args":["-y","tavily-mcp@0.2.3"],"env":{"TAVILY_API_KEY":"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"},"alwaysAllow":["tavily-search","tavily-extract","tavily-crawl","tavily-map"]}}} 

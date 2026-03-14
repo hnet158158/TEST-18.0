@@ -2,7 +2,11 @@
 
 ## Project Overview
 
-**Deal Tracker API** — REST API для отслеживания сделок через стадии с хронологической историей активностей. Прототип на FastAPI + SQLite с фазовой архитектурой.
+**Deal Tracker** — Full-stack приложение для отслеживания сделок через стадии с хронологической историей активностей. 
+
+**Архитектура:**
+- **Backend:** FastAPI + SQLite (REST API `/api/v1/`)
+- **Frontend:** NiceGUI (Python web framework)
 
 **Режим:** PROTOTYPE  
 **Масштаб:** Десятки сделок, демо-версия
@@ -11,109 +15,137 @@
 
 ## Architecture / Modules
 
-### Module: Models
+### Module: Backend Models
 - **Contract**: Определяет структуру данных и связи между сущностями через SQLAlchemy ORM.
 - **Negative Constraints**:
   - НЕ добавлять поля, не указанные в requirements
   - НЕ каскадное удаление (RESTRICT для всех FK)
 - **Map**:
-  - `Base` — базовый класс для моделей
   - `User` — пользователь системы
   - `Company` — компания-клиент
   - `Deal` — сделка
   - `Activity` — активность по сделке
   - `DealStage` (Enum) — стадии сделки
   - `ActivityType` (Enum) — типы активностей
-- **Internal Logic**: Simple ORM mapping. Нет сложной логики.
+- **Internal Logic**: Simple ORM mapping.
 - **Mental Test**: "Passed: Модели импортируются, БД создаётся."
 
-### Module: Database
-- **Contract**: Управляет соединением с SQLite и сессиями БД.
-- **Negative Constraints**:
-  - НЕ использовать асинхронный драйвер (sync SQLite)
-  - НЕ connection pooling (прототип)
-- **Map**:
-  - `engine` — SQLAlchemy engine
-  - `SessionLocal` — фабрика сессий
-  - `get_db()` — dependency injection для FastAPI
-  - `create_tables()` — инициализация схемы
-- **Internal Logic**: Simple factory pattern.
-- **Mental Test**: "Passed: Сессия создаётся и закрывается корректно."
-
-### Module: Repositories
-- **Contract**: Инкапсулирует все операции с БД. CRUD для каждой сущности.
-- **Negative Constraints**:
-  - НЕ бизнес-логика (только данные)
-  - НЕ валидация бизнес-правил
-- **Map**:
-  - `UserRepository`: create, get_by_id, get_all(skip, limit), get_by_email
-  - `CompanyRepository`: create, get_by_id, get_all(skip, limit), update, delete, has_deals
-  - `DealRepository`: create, get_by_id, get_all(skip, limit, stage, company_id), update, delete, change_stage, has_activities
-  - `ActivityRepository`: create, get_by_deal_id(skip, limit)
-- **Internal Logic**: Simple CRUD. Нет сложных алгоритмов.
-- **Mental Test**: "Passed: Все CRUD операции работают."
-
-### Module: Services
-- **Contract**: Бизнес-логика приложения. Валидация, транзакции, системные события. Возвращает доменные ошибки (не HTTP-коды).
+### Module: Backend Services
+- **Contract**: Бизнес-логика приложения. Валидация, транзакции, системные события.
 - **Negative Constraints**:
   - НЕ прямой доступ к БД (только через repositories)
   - НЕ HTTP-коды (это в API layer)
-  - НЕ знание о HTTP протоколе
 - **Map**:
-  - `UserService`: create_user, get_user, get_users(skip, limit)
-  - `CompanyService`: create_company, get_company, get_companies(skip, limit), update_company, delete_company
-  - `DealService`: create_deal, get_deal, get_deals(skip, limit, stage, company_id), update_deal, delete_deal, change_deal_stage
-  - `ActivityService`: create_activity, get_deal_timeline(skip, limit)
-  - `Domain Errors`: NotFoundError, InvalidStageTransitionError, ForeignKeyValidationError
-- **Internal Logic**:
-  *** ALGORITHM DESIGN: change_deal_stage ***
-  STEP 1: Получить текущую сделку по ID
-  STEP 2: Проверить существование сделки → ЕСЛИ нет → поднять NotFoundError
-  STEP 3: Получить текущую стадию (old_stage)
-  STEP 4: Проверить допустимость перехода по таблице переходов
-  STEP 5: ЕСЛИ переход недопустим → поднять InvalidStageTransitionError с допустимыми стадиями
-  STEP 6: Обновить stage в сделке
-  STEP 7: Создать Activity с type=NOTE, description="Stage changed from {old} to {new}"
-  STEP 8: Вернуть обновлённую сделку
-  ************************
-- **Mental Test**: "Passed: Невалидный переход стадии поднимает InvalidStageTransitionError."
+  - `UserService`: create_user, get_user, get_users
+  - `CompanyService`: create_company, get_company, get_companies, update_company, delete_company
+  - `DealService`: create_deal, get_deal, get_deals, update_deal, delete_deal, change_deal_stage
+  - `ActivityService`: create_activity, get_deal_timeline
+- **Internal Logic**: Валидация переходов стадий, FK валидация.
+- **Mental Test**: "Passed: Невалидный переход стадии возвращает ошибку."
 
-### Module: API Routes
-- **Contract**: HTTP интерфейс. Обработка запросов, валидация Pydantic, возврат ответов.
+### Module: Backend API Routes
+- **Contract**: HTTP интерфейс. REST endpoints с Pydantic схемами.
 - **Negative Constraints**:
-  - НЕ бизнес-логика (делегировать services)
-  - НЕ прямой доступ к БД
+  - НЕ бизнес-логика в роутах
+  - НЕ прямой доступ к БД из роутов
 - **Map**:
   - `POST /api/v1/users` — создать пользователя
-  - `GET /api/v1/users?skip=0&limit=100` — список пользователей (с пагинацией)
+  - `GET /api/v1/users` — список пользователей
   - `GET /api/v1/users/{id}` — получить пользователя
   - `POST /api/v1/companies` — создать компанию
-  - `GET /api/v1/companies?skip=0&limit=100` — список компаний (с пагинацией)
+  - `GET /api/v1/companies` — список компаний
   - `GET /api/v1/companies/{id}` — получить компанию
   - `PUT /api/v1/companies/{id}` — обновить компанию
   - `DELETE /api/v1/companies/{id}` — удалить компанию
   - `POST /api/v1/deals` — создать сделку
-  - `GET /api/v1/deals?skip=0&limit=100&stage=&company_id=` — список сделок (фильтры + пагинация)
+  - `GET /api/v1/deals` — список сделок (фильтры + пагинация)
   - `GET /api/v1/deals/{id}` — получить сделку
   - `PUT /api/v1/deals/{id}` — обновить сделку
   - `PATCH /api/v1/deals/{id}/stage` — изменить стадию
   - `DELETE /api/v1/deals/{id}` — удалить сделку
   - `POST /api/v1/deals/{deal_id}/activities` — добавить активность
-  - `GET /api/v1/deals/{deal_id}/activities?skip=0&limit=100` — timeline сделки (с пагинацией)
-- **Internal Logic**: Simple routing. Валидация через Pydantic schemas.
-- **Mental Test**: "Passed: Все эндпоинты возвращают корректные HTTP коды."
+  - `GET /api/v1/deals/{deal_id}/activities` — timeline сделки
+- **Internal Logic**: Simple routing.
+- **Mental Test**: "Passed: Все 16 эндпоинтов работают."
 
-### Module: Schemas
-- **Contract**: Pydantic модели для request/response валидации.
+### Module: Frontend Core
+- **Contract**: NiceGUI приложение с навигацией, layout и API клиентом.
 - **Negative Constraints**:
-  - НЕ ORM модели (отдельный слой)
+  - НЕ дублировать бизнес-логику (делегировать backend API)
+  - НЕ прямое подключение к БД из фронтенда
 - **Map**:
-  - `UserCreate`, `UserResponse`
-  - `CompanyCreate`, `CompanyUpdate`, `CompanyResponse`
-  - `DealCreate`, `DealUpdate`, `DealStageUpdate`, `DealResponse`
-  - `ActivityCreate`, `ActivityResponse`
-- **Internal Logic**: Simple Pydantic models.
-- **Mental Test**: "Passed: Валидация работает, лишние поля отбрасываются."
+  - `app.py` — точка входа NiceGUI
+  - `api_client.py` — HTTP клиент для backend API
+  - `layout.py` — общий layout с навигацией
+  - `components/` — переиспользуемые UI компоненты
+- **Internal Logic**: Simple UI routing.
+- **Mental Test**: "Passed: Страницы открываются, навигация работает."
+
+### Module: Frontend Pages - Users
+- **Contract**: UI для управления пользователями.
+- **Negative Constraints**:
+  - НЕ показывать DELETE (User нельзя удалить)
+  - НЕ показывать EDIT (User нельзя редактировать)
+- **Map**:
+  - `pages/users/list.py` — список пользователей
+  - `pages/users/detail.py` — детали пользователя
+  - `pages/users/create.py` — создание пользователя
+- **Internal Logic**: Simple CRUD UI.
+- **Mental Test**: "Passed: Пользователь создаётся, список отображается."
+
+### Module: Frontend Pages - Companies
+- **Contract**: UI для управления компаниями.
+- **Negative Constraints**:
+  - НЕ удалять компанию со связанными сделками (показать ошибку)
+- **Map**:
+  - `pages/companies/list.py` — список компаний
+  - `pages/companies/detail.py` — детали компании + связанные сделки
+  - `pages/companies/create.py` — создание компании
+  - `pages/companies/edit.py` — редактирование компании
+- **Internal Logic**: Simple CRUD UI.
+- **Mental Test**: "Passed: Компания создаётся, редактируется, удаляется."
+
+### Module: Frontend Pages - Deals
+- **Contract**: UI для управления сделками с визуализацией пайплайна.
+- **Negative Constraints**:
+  - НЕ редактировать company_id и owner_id (immutable)
+  - НЕ удалять сделку с активностями (показать ошибку)
+  - НЕ указывать stage при создании (всегда LEAD)
+- **Map**:
+  - `pages/deals/list.py` — список сделок с фильтрами
+  - `pages/deals/kanban.py` — Kanban доска по стадиям
+  - `pages/deals/detail.py` — детали сделки + timeline
+  - `pages/deals/create.py` — создание сделки
+  - `pages/deals/edit.py` — редактирование сделки
+  - `pages/deals/stage_change.py` — изменение стадии
+- **Internal Logic**: 
+  *** ALGORITHM DESIGN: Stage Change UI ***
+  STEP 1: Получить текущую стадию сделки
+  STEP 2: Показать только допустимые стадии для перехода
+  STEP 3: При выборе — вызвать PATCH /deals/{id}/stage
+  STEP 4: Показать результат (успех/ошибка)
+  ************************
+- **Mental Test**: "Passed: Сделка создаётся, стадия меняется по правилам."
+
+### Module: Frontend Pages - Activities
+- **Contract**: UI для работы с активностями (timeline сделки).
+- **Negative Constraints**:
+  - НЕ показывать DELETE (Activity immutable)
+  - НЕ показывать EDIT (Activity immutable)
+- **Map**:
+  - `pages/activities/create.py` — создание активности
+  - `pages/activities/timeline.py` — timeline сделки (встроен в deal detail)
+- **Internal Logic**: Simple create + list UI.
+- **Mental Test**: "Passed: Активность создаётся, timeline отображается."
+
+### Module: Frontend Pages - Dashboard
+- **Contract**: Главная страница с обзором пайплайна и статистикой.
+- **Negative Constraints**:
+  - НЕ показывать детальную информацию (только обзор)
+- **Map**:
+  - `pages/dashboard.py` — статистика по стадиям, последние сделки
+- **Internal Logic**: Агрегация данных для отображения.
+- **Mental Test**: "Passed: Dashboard показывает статистику."
 
 ---
 
@@ -122,7 +154,6 @@
 | Запрещено | Причина |
 |-----------|---------|
 | Аутентификация/авторизация | Не требуется в прототипе |
-| Frontend | Backend only |
 | WebSocket/Real-time | Избыточно |
 | Кэширование | Избыточно |
 | Микросервисы | Монолит достаточен |
@@ -134,6 +165,8 @@
 | DELETE /activities/{id} | Activity immutable |
 | PUT/PATCH company_id, owner_id | Immutable после создания |
 | Секреты в коде | Использовать ENV переменные |
+| Прямое подключение фронтенда к БД | Только через REST API |
+| Дублирование бизнес-логики во фронтенде | Делегировать backend |
 
 ---
 
@@ -150,7 +183,6 @@
   5. `app/models/activity.py` — модель Activity с ActivityType enum
   6. `app/database.py` — engine, SessionLocal, get_db, create_tables
   7. `app/config.py` — настройки приложения
-  8. `app/__init__.py` — инициализация пакета
 - **Dependencies**: Нет
 - **Negative Constraints**:
   - НЕ добавлять cascade delete
@@ -182,7 +214,7 @@
   - Unit-тесты проходят (минимум 80% coverage)
 - **Notes for Tester**:
   - Проверить все CRUD методы для каждой сущности
-  - Проверить `has_deals()` и `has_activities()` возвращают корректные значения
+  - Проверить `has_deals()` и `has_activities()`
 
 ### Phase 3: Services
 - **Goal**: Реализовать бизнес-логику с валидацией переходов стадий и FK.
@@ -192,18 +224,19 @@
   2. `app/services/company_service.py` — CompanyService
   3. `app/services/deal_service.py` — DealService с валидацией переходов
   4. `app/services/activity_service.py` — ActivityService
-  5. `tests/unit/test_services.py` — unit-тесты
+  5. `app/services/errors.py` — доменные ошибки
+  6. `tests/unit/test_services.py` — unit-тесты
 - **Dependencies**: Phase 2
 - **Negative Constraints**:
   - НЕ прямой SQL (только через repositories)
-  - НЕ HTTP-коды в сервисах (это в API)
+  - НЕ HTTP-коды в сервисах
 - **Done Criteria**:
   - Валидация переходов стадий работает по таблице
   - FK валидация возвращает понятные ошибки
   - При смене стадии создаётся Activity
   - Unit-тесты проходят (минимум 80% coverage)
 - **Notes for Tester**:
-  - Проверить все переходы стадий по таблице (раздел 4.1 requirements)
+  - Проверить все переходы стадий по таблице
   - Проверить создание системной Activity при смене стадии
   - Проверить ошибки при невалидных FK
 
@@ -230,7 +263,7 @@
   - Все 16 эндпоинтов работают
   - HTTP коды корректны (200, 201, 204, 400, 404, 422)
   - Integration-тесты проходят
-  - Все 15 acceptance criteria из requirements выполнены
+  - Все 15 acceptance criteria выполнены
 - **Notes for Tester**:
   - Проверить все 15 acceptance criteria из requirements.md
   - Проверить формат ошибок `{"detail": "..."}`
@@ -238,7 +271,7 @@
   - Проверить сортировку timeline (DESC)
 
 ### Phase 5: API Pagination
-- **Goal**: Экспонировать пагинацию через query parameters для всех list endpoints.
+- **Goal**: Экспонировать пагинацию через query parameters.
 - **Scope**: Добавить `skip` и `limit` query parameters в GET endpoints.
 - **Deliverables**:
   1. `app/api/v1/users.py` — добавить skip/limit в `GET /users`
@@ -248,7 +281,7 @@
   5. `tests/integration/test_api.py` — добавить тесты на API пагинацию
 - **Dependencies**: Phase 4
 - **Negative Constraints**:
-  - НЕ менять сигнатуры services/repositories (уже поддерживают пагинацию)
+  - НЕ менять сигнатуры services/repositories
   - НЕ добавлять пагинацию в non-list endpoints
 - **Done Criteria**:
   - Все 4 list endpoints принимают skip и limit
@@ -259,8 +292,140 @@
   - Проверить GET /companies?skip=5&limit=20
   - Проверить GET /deals?skip=0&limit=50&stage=lead
   - Проверить GET /deals/{id}/activities?skip=0&limit=25
-  - Проверить default values (skip=0, limit=100)
-  - Проверить edge cases: skip > total, limit=0
+
+### Phase 6: Frontend Foundation
+- **Goal**: Создать базовую структуру NiceGUI приложения с навигацией и API клиентом.
+- **Scope**: NiceGUI setup, layout, navigation, HTTP client для backend API.
+- **Deliverables**:
+  1. `frontend/app.py` — точка входа NiceGUI
+  2. `frontend/api_client.py` — HTTP клиент для backend API
+  3. `frontend/layout.py` — общий layout с sidebar навигацией
+  4. `frontend/components/__init__.py` — инициализация компонентов
+  5. `frontend/pages/__init__.py` — инициализация страниц
+  6. `frontend/pages/home.py` — домашняя страница (placeholder)
+  7. `requirements.txt` — добавить nicegui
+- **Dependencies**: Phase 5
+- **Negative Constraints**:
+  - НЕ дублировать бизнес-логику
+  - НЕ прямое подключение к БД
+- **Done Criteria**:
+  - NiceGUI приложение запускается
+  - Навигация между страницами работает
+  - API клиент может вызывать backend endpoints
+- **Notes for Tester**:
+  - Проверить запуск `python frontend/app.py`
+  - Проверить навигацию: Dashboard, Users, Companies, Deals
+  - Проверить API клиент: GET /api/v1/users
+
+### Phase 7: Users Pages
+- **Goal**: Реализовать UI для управления пользователями.
+- **Scope**: Список, детали, создание пользователей.
+- **Deliverables**:
+  1. `frontend/pages/users/list.py` — таблица пользователей
+  2. `frontend/pages/users/detail.py` — карточка пользователя
+  3. `frontend/pages/users/create.py` — форма создания
+  4. `frontend/components/table.py` — переиспользуемый компонент таблицы
+  5. `frontend/components/form.py` — переиспользуемый компонент формы
+- **Dependencies**: Phase 6
+- **Negative Constraints**:
+  - НЕ показывать DELETE (User нельзя удалить)
+  - НЕ показывать EDIT (User нельзя редактировать)
+- **Done Criteria**:
+  - Список пользователей отображается с пагинацией
+  - Форма создания работает с валидацией email
+  - Детали пользователя показывают связанные сделки
+- **Notes for Tester**:
+  - Проверить создание пользователя с duplicate email (ошибка)
+  - Проверить пагинацию списка
+  - Проверить переход: список → детали
+
+### Phase 8: Companies Pages
+- **Goal**: Реализовать полный CRUD UI для компаний.
+- **Scope**: Список, детали, создание, редактирование, удаление компаний.
+- **Deliverables**:
+  1. `frontend/pages/companies/list.py` — таблица компаний
+  2. `frontend/pages/companies/detail.py` — карточка компании + связанные сделки
+  3. `frontend/pages/companies/create.py` — форма создания
+  4. `frontend/pages/companies/edit.py` — форма редактирования
+  5. `frontend/components/dialogs.py` — диалог подтверждения удаления
+- **Dependencies**: Phase 7
+- **Negative Constraints**:
+  - НЕ удалять компанию со связанными сделками (показать ошибку)
+- **Done Criteria**:
+  - CRUD для компаний работает полностью
+  - При удалении компании со сделками — показывается ошибка
+  - В деталях компании видны связанные сделки
+- **Notes for Tester**:
+  - Проверить удаление компании со сделками (ошибка 400)
+  - Проверить редактирование: name, website, industry
+  - Проверить переход: компания → связанные сделки
+
+### Phase 9: Deals List & Kanban
+- **Goal**: Реализовать UI для просмотра сделок с Kanban доской.
+- **Scope**: Список с фильтрами, Kanban доска по стадиям.
+- **Deliverables**:
+  1. `frontend/pages/deals/list.py` — таблица сделок с фильтрами
+  2. `frontend/pages/deals/kanban.py` — Kanban доска (6 колонок)
+  3. `frontend/components/kanban.py` — Kanban компонент
+  4. `frontend/components/filters.py` — компонент фильтров
+- **Dependencies**: Phase 8
+- **Negative Constraints**:
+  - НЕ показывать stage selector при создании
+  - НЕ редактировать company_id и owner_id
+- **Done Criteria**:
+  - Список сделок с фильтрами по stage и company
+  - Kanban доска показывает сделки по стадиям
+  - Drag-and-drop для смены стадии (опционально)
+- **Notes for Tester**:
+  - Проверить фильтры: ?stage=lead, ?company_id=...
+  - Проверить Kanban: 6 колонок (LEAD → WON/LOST)
+  - Проверить переход: Kanban → детали сделки
+
+### Phase 10: Deals CRUD & Stage Change
+- **Goal**: Реализовать полный CRUD UI для сделок с валидацией смены стадии.
+- **Scope**: Детали, создание, редактирование, удаление, смена стадии.
+- **Deliverables**:
+  1. `frontend/pages/deals/detail.py` — карточка сделки + timeline
+  2. `frontend/pages/deals/create.py` — форма создания (select company, owner)
+  3. `frontend/pages/deals/edit.py` — форма редактирования
+  4. `frontend/pages/deals/stage_change.py` — UI смены стадии
+  5. `frontend/components/timeline.py` — компонент timeline
+- **Dependencies**: Phase 9
+- **Negative Constraints**:
+  - НЕ удалять сделку с активностями (показать ошибку)
+  - НЕ показывать недопустимые стадии при смене
+  - НЕ редактировать company_id, owner_id, stage через форму
+- **Done Criteria**:
+  - CRUD для сделок работает полностью
+  - Смена стадии валидируется по таблице переходов
+  - При удалении сделки с активностями — ошибка
+  - Timeline показывает активности в DESC порядке
+- **Notes for Tester**:
+  - Проверить все переходы стадий по таблице
+  - Проверить недопустимые переходы (ошибка 400)
+  - Проверить удаление сделки с активностями (ошибка 400)
+  - Проверить timeline: новые активности сверху
+
+### Phase 11: Activities & Dashboard
+- **Goal**: Реализовать UI для активностей и главную страницу с дашбордом.
+- **Scope**: Создание активностей, timeline, dashboard со статистикой.
+- **Deliverables**:
+  1. `frontend/pages/activities/create.py` — форма создания активности
+  2. `frontend/pages/dashboard.py` — главная страница со статистикой
+  3. `frontend/components/stat_card.py` — карточка статистики
+  4. `frontend/components/chart.py` — простая визуализация (опционально)
+- **Dependencies**: Phase 10
+- **Negative Constraints**:
+  - НЕ показывать DELETE для активностей
+  - НЕ показывать EDIT для активностей
+- **Done Criteria**:
+  - Активности создаются для сделки
+  - Dashboard показывает статистику по стадиям
+  - Dashboard показывает последние сделки
+- **Notes for Tester**:
+  - Проверить создание активности: type, description
+  - Проверить dashboard: count по стадиям
+  - Проверить dashboard: последние 5 сделок
 
 ---
 
@@ -271,6 +436,12 @@
 - Phase 3 - Services - DONE
 - Phase 4 - API Routes - DONE
 - Phase 5 - API Pagination - DONE
+- Phase 6 - Frontend Foundation - PLANNED
+- Phase 7 - Users Pages - PLANNED
+- Phase 8 - Companies Pages - PLANNED
+- Phase 9 - Deals List & Kanban - PLANNED
+- Phase 10 - Deals CRUD & Stage Change - PLANNED
+- Phase 11 - Activities & Dashboard - PLANNED
 
 ---
 
@@ -278,15 +449,15 @@
 
 | Риск | Вероятность | Митигация |
 |------|-------------|-----------|
-| SQLite блокировки при конкурентных запросах | Низкая (прототип) | Не критично для демо |
-| Нет миграций | Низкая | create_tables() достаточно для прототипа |
-| Нет аутентификации | Принято | Требования не включают |
+| NiceGUI async vs sync backend | Низкая | NiceGUI поддерживает оба режима |
+| Drag-and-drop в Kanban | Средняя | Опционально, можно использовать кнопки |
+| Производительность при большом количестве сделок | Низкая | Пагинация на backend |
 
 ---
 
 ## Archive / Notes
 
-- Требования финализированы 2026-03-13
+- Backend фазы 1-5 завершены 2026-03-13
+- Фронтенд фазы 6-11 добавлены по запросу пользователя
 - Режим PROTOTYPE — relaxed checks, NO Skeptic
-- Фазы соответствуют разделу 8 requirements.md
-- 2026-03-13: Добавлена Phase 5 (API Pagination) по запросу пользователя после обнаружения GAP Tester'ом
+- NiceGUI выбран как Python-native web framework
